@@ -127,6 +127,7 @@ class MwePopupsActions {
       'Accept': 'application/json; charset=utf-8; profile="https://www.mediawiki.org/wiki/Specs/Summary/1.4.2"',
       'User-Agent': MwePopups.userAgent
     }).then(response => response.json()).then(page => {
+      if (!page.hasOwnProperty('pageid')) { throw page; }
       MwePopupsActions.state = MwePopupsActions.types.FETCH_COMPLETE;
       return MwePopupsPreviewModel.createModel(
         page.title,
@@ -162,6 +163,7 @@ class MwePopupsActions {
     MwePopupsActions.openTimeout = setTimeout(function() {
       MwePopupsActions.openTimeout = Number.NaN;
       MwePopupsActions.fetch(gateway, title, el, token, type).then(model => {
+        if (!model) { return; }
         MwePopupsActions.preview = MwePopupsUiRenderer.render(model);
         MwePopupsActions.preview.show(measures, MwePopupsActions, token);
       });
@@ -179,7 +181,9 @@ class MwePopupsActions {
     if (!isNaN(MwePopupsActions.closeTimeout)) { return; }
     MwePopupsActions.closeTimeout = setTimeout(function() {
       MwePopupsActions.closeTimeout = Number.NaN;
-      MwePopupsActions.preview.hide();
+      if (MwePopupsActions.preview) {
+        MwePopupsActions.preview.hide();
+      }
       MwePopupsActions.state = MwePopupsActions.types.ABANDON_END;
     }, MwePopupsActions.ABANDON_END_DELAY);
   }
@@ -336,7 +340,6 @@ class MwePopupsUiRenderer {
   static createPagePreview(model) {
     const thumbnail = MwePopupsUiThumbnail.createThumbnail(model.thumbnail),
       hasThumbnail = thumbnail !== null;
-
     return {
       el: MwePopupsUiPagePreview.renderPagePreview(model, thumbnail),
       hasThumbnail,
@@ -345,7 +348,22 @@ class MwePopupsUiRenderer {
     }
   }
 
-  static createEmptyPreview(model) {} //TODO
+  static createEmptyPreview(model) {
+    const showTitle = false,
+      // https://github.com/wikimedia/mediawiki-extensions-Popups/blob/master/i18n/en.json
+      extractMsg = 'There was an issue displaying this preview', // popups-preview-no-preview
+      linkMsg = 'Go to this page', //popups-preview-footer-read
+      // Custom additions to support thumbnails
+      thumbnail = MwePopupsUiThumbnail.createThumbnail(model.thumbnail),
+      hasThumbnail = thumbnail !== null;
+
+    return {
+      el: MwPopupsUiPreview.renderPreview(model, showTitle, extractMsg, linkMsg, thumbnail),
+      hasThumbnail: hasThumbnail,
+      thumbnail,
+      isTall: hasThumbnail && thumbnail.isTall
+    };
+  }
   static createDisambiguationPreview(model) {} //TODO
   static createReferencePreview(model) {} //TODO
 
@@ -482,7 +500,7 @@ class MwePopupsUiRenderer {
     }
   }
 
-  static setThumbnailClipPath({el, isTall, thumbnail }, {flippedY, flippedX, dir }) {
+  static setThumbnailClipPath({el, isTall, thumbnail}, {flippedY, flippedX, dir}) {
     const maskID = this.getThumbnailClipPathID(isTall, flippedY, flippedX);
     if (maskID) {
       const matrix = {
@@ -553,66 +571,61 @@ class MwePopupsUiThumbnail {
     const thumbWidth = rawThumbnail.width / devicePixelRatio;
     const thumbHeight = rawThumbnail.height / devicePixelRatio;
 
-  if (
-    // Image too small for landscape display
-    ( !tall && thumbWidth < this.SIZES.landscapeImage.w ) ||
-    // Image too small for portrait display
-    ( tall && thumbHeight < this.SIZES.portraitImage.h ) ||
-    // These characters in URL that could inject CSS and thus JS
-    (
-      rawThumbnail.source.indexOf( '\\' ) > -1 ||
-      rawThumbnail.source.indexOf( '\'' ) > -1 ||
-      rawThumbnail.source.indexOf( '"' ) > -1
-    )
-  ) {
+    if (
+      ( !tall && thumbWidth < this.SIZES.landscapeImage.w ) ||
+      ( tall && thumbHeight < this.SIZES.portraitImage.h ) ||
+      (
+        rawThumbnail.source.indexOf( '\\' ) > -1 ||
+        rawThumbnail.source.indexOf( '\'' ) > -1 ||
+        rawThumbnail.source.indexOf( '"' ) > -1
+      )
+    ) {
     return null;
   }
 
-  let x, y, width, height;
-  if ( tall ) {
-    x = ( thumbWidth > this.SIZES.portraitImage.w ) ?
-      ( ( thumbWidth - this.SIZES.portraitImage.w ) / -2 ) :
-      ( this.SIZES.portraitImage.w - thumbWidth );
-    y = ( thumbHeight > this.SIZES.portraitImage.h ) ?
-      ( ( thumbHeight - this.SIZES.portraitImage.h ) / -2 ) : 0;
-    width = this.SIZES.portraitImage.w;
-    height = this.SIZES.portraitImage.h;
+    let x, y, width, height;
+    if ( tall ) {
+      x = ( thumbWidth > this.SIZES.portraitImage.w ) ?
+        ( ( thumbWidth - this.SIZES.portraitImage.w ) / -2 ) :
+        ( this.SIZES.portraitImage.w - thumbWidth );
+      y = ( thumbHeight > this.SIZES.portraitImage.h ) ?
+        ( ( thumbHeight - this.SIZES.portraitImage.h ) / -2 ) : 0;
+      width = this.SIZES.portraitImage.w;
+      height = this.SIZES.portraitImage.h;
 
-    // Special handling for thin tall images
-    // https://phabricator.wikimedia.org/T192928#4312088
-    if ( thumbWidth < width ) {
+      if ( thumbWidth < width ) {
+        x = 0;
+        width = thumbWidth;
+      }
+    } else {
       x = 0;
-      width = thumbWidth;
+      y = ( thumbHeight > this.SIZES.landscapeImage.h ) ?
+        ( ( thumbHeight - this.SIZES.landscapeImage.h ) / -2 ) : 0;
+      width = this.SIZES.landscapeImage.w;
+      height = ( thumbHeight > this.SIZES.landscapeImage.h ) ?
+        this.SIZES.landscapeImage.h : thumbHeight;
     }
-  } else {
-    x = 0;
-    y = ( thumbHeight > this.SIZES.landscapeImage.h ) ?
-      ( ( thumbHeight - this.SIZES.landscapeImage.h ) / -2 ) : 0;
-    width = this.SIZES.landscapeImage.w;
-    height = ( thumbHeight > this.SIZES.landscapeImage.h ) ?
-      this.SIZES.landscapeImage.h : thumbHeight;
+
+    const isNarrow = tall && thumbWidth < this.SIZES.portraitImage.w;
+
+    return {
+      el: this.createThumbnailElement(
+        tall ? 'mwe-popups-is-tall' : 'mwe-popups-is-not-tall',
+        rawThumbnail.source,
+        x,
+        y,
+        thumbWidth,
+        thumbHeight,
+        width,
+        height
+      ),
+      isTall: tall,
+      isNarrow,
+      offset: isNarrow ? this.SIZES.portraitImage.w - thumbWidth : 0,
+      width: thumbWidth,
+      height: thumbHeight
+    };
   }
-
-  const isNarrow = tall && thumbWidth < this.SIZES.portraitImage.w;
-
-  return {
-    el: this.createThumbnailElement(
-      tall ? 'mwe-popups-is-tall' : 'mwe-popups-is-not-tall',
-      rawThumbnail.source,
-      x,
-      y,
-      thumbWidth,
-      thumbHeight,
-      width,
-      height
-    ),
-    isTall: tall,
-    isNarrow,
-    offset: isNarrow ? this.SIZES.portraitImage.w - thumbWidth : 0,
-    width: thumbWidth,
-    height: thumbHeight
-  };
-}
 
   static createThumbnailElement(className, url, x, y, thumbnailWidth, thumbnailHeight, width, height) {
     const nsSvg = 'http://www.w3.org/2000/svg',
@@ -648,6 +661,26 @@ class MwePopupsUiThumbnail {
 class MwePopupsUiTemplateUtil {
   static templates = {};
 
+  // https://github.com/wikimedia/mediawiki/blob/master/resources/src/mediawiki.base/mediawiki.base.js
+  static escapeCallback(s) {
+    switch (s) {
+      case '\'':
+        return '&#039;'
+      case '"':
+        return '&quot;';
+      case '<':
+        return '&lt;';
+      case '>':
+        return '&gt;';
+      case '&':
+        return '&amp;';
+    }
+  }
+
+  static escapeHTML(str) {
+    return str.replace(/['"<>&]/g, this.escapeCallback);
+  }
+
   static createNodeFromTemplate(html) {
     if (!this.templates[html]) {
       const div = document.createElement('div');
@@ -670,6 +703,44 @@ class MwePopupsUiPopup {
     container.className = 'mwe-popups-container';
     element.appendChild(container);
     return element;
+  }
+}
+
+// https://github.com/wikimedia/mediawiki-extensions-Popups/blob/master/src/ui/templates/preview/preview.js
+class MwPopupsUiPreview {
+  static templateHTML = `
+<div class="mwe-popups-container">
+  <a class="mwe-popups-discreet"></a>
+  <div class="mw-ui-icon mw-ui-icon-element"></div>
+  <strong class="mwe-popups-title"></strong>
+  <a class="mwe-popups-extract">
+    <span class="mwe-popups-message"></span>
+  </a>
+  <footer>
+    <a class="mwe-popups-read-link"></a>
+  </footer>
+</div>
+`;
+
+  static renderPreview(model, showTitle, extractMsg, linkMsg, thumbnail) {
+    const popup = MwePopupsUiPopup.renderPopup(model.type, MwePopupsUiTemplateUtil.createNodeFromTemplate(this.templateHTML));
+    popup.querySelector('.mw-ui-icon').classList.add(`mw-ui-icon-preview-${model.type}`);
+    popup.querySelector('.mwe-popups-discreet').href = model.url;
+    popup.querySelector('.mwe-popups-extract').href = model.url;
+    popup.querySelector('.mwe-popups-message').innerHTML = MwePopupsUiTemplateUtil.escapeHTML(extractMsg);
+    popup.querySelector('.mwe-popups-read-link').innerHTML = MwePopupsUiTemplateUtil.escapeHTML(linkMsg);
+    popup.querySelector('.mwe-popups-read-link').href = model.url;
+    if (showTitle) {
+      popup.querySelector('.mwe-popups-title').innerHTML = MwePopupsUiTemplateUtil.escapeHTML(model.title);
+    } else {
+      popup.querySelector('.mwe-popups-title').remove();
+    }
+    if (thumbnail) {
+      popup.querySelector('.mwe-popups-discreet').append(thumbnail.el);
+    } else {
+      popup.querySelector('.mwe-popups-discreet').remove();
+    }
+    return popup;
   }
 }
 
